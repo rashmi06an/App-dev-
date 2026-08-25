@@ -9,6 +9,7 @@ const SONGS_DIR = path.join(__dirname, "songs");
 let allSongs = [];
 let cursor = 0;
 let currentProcess = null;
+let isPaused = false;
 
 // -----------------------------
 // LIST / RENDER SONGS
@@ -21,16 +22,23 @@ function listSongs(songDirPath) {
     // Move cursor to top-left
     process.stdout.write("\x1b[H");
 
+    // Clear terminal
+    process.stdout.write("\x1b[2J");
+
     const menuText = allSongs
         .map((songName, index) => {
             return `${index === cursor ? ">" : " "} ${songName}`;
         })
         .join("\n");
 
-    // Clear old menu and write new menu
     process.stdout.write(menuText);
-    process.stdout.write("\x1b[J");
+
+    process.stdout.write("\n\n");
+    process.stdout.write(
+        "N = Next | B = Previous | P = Pause/Resume | Q = Quit\n"
+    );
 }
+
 
 // -----------------------------
 // PLAY SONG
@@ -45,19 +53,43 @@ function playSong(songName) {
         currentProcess = null;
     }
 
-    // Move below menu
-    process.stdout.write("\n\n");
-    process.stdout.write(`▶ Playing: ${songName}\n`);
+    // Reset pause state
+    isPaused = false;
 
-    currentProcess = spawn("afplay", [songPath]);
+    // Render menu
+    listSongs(SONGS_DIR);
 
+    // Show currently playing song
+    process.stdout.write(`\n▶ Playing: ${songName}\n`);
+
+    // Start VLC
+    // currentProcess = spawn("afplay", [songPath]);
+currentProcess = spawn(
+    "/Applications/VLC.app/Contents/MacOS/VLC",
+    [
+        "--intf",
+        "dummy",
+        "--play-and-exit",
+        songPath
+    ]
+);
+    // When song finishes
     currentProcess.on("close", () => {
-        currentProcess = null;
 
-        // Return to menu
-        listSongs(SONGS_DIR);
+        currentProcess = null;
+        isPaused = false;
+
+        // Automatically move to next song
+        cursor++;
+
+        if (cursor >= allSongs.length) {
+            cursor = 0;
+        }
+
+        playSong(allSongs[cursor]);
     });
 }
+
 
 // -----------------------------
 // KEYBOARD INPUT
@@ -66,78 +98,11 @@ process.stdin.setRawMode(true);
 process.stdin.resume();
 process.stdin.setEncoding("utf8");
 
-// process.stdin.on("data", (key) => {
-    
-
-//     // -------------------------
-//     // UP → PREVIOUS
-//     // -------------------------
-//     if (key === "\u001b[A") {
-
-//         cursor--;
-
-//         // Loop: first → last
-//         if (cursor < 0) {
-//             cursor = allSongs.length - 1;
-//         }
-
-//         listSongs(SONGS_DIR);
-//     }
-
-//     // -------------------------
-//     // DOWN → NEXT
-//     // -------------------------
-//     else if (key === "\u001b[B") {
-
-//         cursor++;
-
-//         // Loop: last → first
-//         if (cursor >= allSongs.length) {
-//             cursor = 0;
-//         }
-
-//         listSongs(SONGS_DIR);
-//     }
-
-//     // -------------------------
-//     // ENTER → PLAY
-//     // -------------------------
-//     else if (key === "\r" || key === "\n") {
-
-//         const selectedSong = allSongs[cursor];
-
-//         playSong(selectedSong);
-//     }
-
-//     // -------------------------
-//     // Q → QUIT
-//     // -------------------------
-//     else if (key === "q") {
-
-//         if (currentProcess) {
-//             currentProcess.kill();
-//         }
-
-//         process.stdin.setRawMode(false);
-//         process.stdin.pause();
-
-//         process.stdout.write("\x1b[2J");
-//         process.stdout.write("\x1b[H");
-
-//         process.exit(0);
-//     }
-// });
-
-// // -----------------------------
-// // START PLAYER
-// // -----------------------------
-
-// // Clear terminal once at start
-// process.stdout.write("\x1b[2J");
-// process.stdout.write("\x1b[H");
-
 process.stdin.on("data", (key) => {
+
+    // -------------------------
     // N → NEXT SONG + PLAY
+    // -------------------------
     if (key === "n") {
 
         cursor++;
@@ -146,10 +111,13 @@ process.stdin.on("data", (key) => {
             cursor = 0;
         }
 
-        listSongs(SONGS_DIR);
         playSong(allSongs[cursor]);
     }
+
+
+    // -------------------------
     // B → PREVIOUS SONG + PLAY
+    // -------------------------
     else if (key === "b") {
 
         cursor--;
@@ -158,24 +126,73 @@ process.stdin.on("data", (key) => {
             cursor = allSongs.length - 1;
         }
 
-        listSongs(SONGS_DIR);
         playSong(allSongs[cursor]);
     }
 
-    // Q → QUIT
-    else if (key === "q") {
 
-        if (currentProcess) {
-            currentProcess.kill();
+    // -------------------------
+    // P → PAUSE / RESUME
+    // -------------------------
+    else if (key === "p") {
+
+        // No song playing
+        if (!currentProcess) {
+            return;
         }
 
+        // Currently playing → PAUSE
+        if (!isPaused) {
+
+            currentProcess.kill("SIGSTOP");
+
+            isPaused = true;
+
+            process.stdout.write("\n⏸ Paused\n");
+        }
+
+        // Currently paused → RESUME
+        else {
+
+            currentProcess.kill("SIGCONT");
+
+            isPaused = false;
+
+            process.stdout.write("\n▶ Resumed\n");
+        }
+    }
+
+
+    // -------------------------
+    // Q → QUIT
+    // -------------------------
+    else if (key === "q") {
+
+        // Stop music
+        if (currentProcess) {
+            currentProcess.kill("SIGKILL");
+            currentProcess = null;
+        }
+
+        // Restore normal terminal input
         process.stdin.setRawMode(false);
         process.stdin.pause();
 
+        // Clear terminal
         process.stdout.write("\x1b[2J");
         process.stdout.write("\x1b[H");
 
         process.exit(0);
     }
 });
+
+
+// -----------------------------
+// START PLAYER
+// -----------------------------
+
+// Clear terminal
+process.stdout.write("\x1b[2J");
+process.stdout.write("\x1b[H");
+
+// Load songs
 listSongs(SONGS_DIR);
